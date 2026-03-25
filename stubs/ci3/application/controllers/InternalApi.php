@@ -5,7 +5,8 @@ use PuyuPe\SiproInternalApiCi3\Http\InternalApiDispatcher;
 use PuyuPe\SiproInternalApiCi3\Nonce\DbNonceStore;
 use PuyuPe\SiproInternalApiCi3\Security\VerifyHmac;
 use PuyuPe\SiproInternalApiCi3\Support\Headers;
-use PuyuPe\SiproInternalApiCore\Contracts\TenantAdapterInterface;
+use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantLifecycleAdapterInterface;
+use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantProvisioningAdapterInterface;
 
 class InternalApi extends CI_Controller
 {
@@ -54,10 +55,11 @@ class InternalApi extends CI_Controller
             return $this->sendJson($verifyError['status'], $verifyError['body']);
         }
 
-        $adapter = $this->resolveTenantAdapter($config);
+        $provisioningAdapter = $this->resolveProvisioningAdapter($config);
+        $lifecycleAdapter = $this->resolveLifecycleAdapter($config);
 
         $dispatcher = new InternalApiDispatcher();
-        $result = $dispatcher->dispatch($method, $path, $rawBody, $headers, $adapter);
+        $result = $dispatcher->dispatch($method, $path, $rawBody, $headers, $provisioningAdapter, $lifecycleAdapter);
 
         return $this->sendJson($result['status'], $result['body']);
     }
@@ -99,29 +101,58 @@ class InternalApi extends CI_Controller
     /**
      * @param array<string,mixed> $config
      */
-    private function resolveTenantAdapter(array $config): TenantAdapterInterface
+    private function resolveProvisioningAdapter(array $config): TenantProvisioningAdapterInterface
     {
-        if (isset($config['adapter']) && $config['adapter'] instanceof TenantAdapterInterface) {
-            return $config['adapter'];
+        if (isset($config['provisioning_adapter']) && $config['provisioning_adapter'] instanceof TenantProvisioningAdapterInterface) {
+            return $config['provisioning_adapter'];
         }
 
-        if (isset($config['adapter_factory']) && is_callable($config['adapter_factory'])) {
-            $adapter = $config['adapter_factory']($this);
-            if ($adapter instanceof TenantAdapterInterface) {
+        if (isset($config['provisioning_adapter_factory']) && is_callable($config['provisioning_adapter_factory'])) {
+            $adapter = $config['provisioning_adapter_factory']($this);
+            if ($adapter instanceof TenantProvisioningAdapterInterface) {
                 return $adapter;
             }
         }
 
-        $adapterClass = $config['adapter_class'] ?? 'ApplicationTenantAdapter';
+        $adapterClass = $config['provisioning_adapter_class'] ?? 'ApplicationTenantAdapter';
 
         if (is_string($adapterClass) && class_exists($adapterClass)) {
             $adapter = new $adapterClass($this);
-            if ($adapter instanceof TenantAdapterInterface) {
+            if ($adapter instanceof TenantProvisioningAdapterInterface) {
                 return $adapter;
             }
         }
 
-        show_error('Tenant adapter must implement TenantAdapterInterface.', 500);
+        show_error('Provisioning adapter must implement TenantProvisioningAdapterInterface.', 500);
+        exit;
+    }
+
+    /**
+     * @param array<string,mixed> $config
+     */
+    private function resolveLifecycleAdapter(array $config): TenantLifecycleAdapterInterface
+    {
+        if (isset($config['lifecycle_adapter']) && $config['lifecycle_adapter'] instanceof TenantLifecycleAdapterInterface) {
+            return $config['lifecycle_adapter'];
+        }
+
+        if (isset($config['lifecycle_adapter_factory']) && is_callable($config['lifecycle_adapter_factory'])) {
+            $adapter = $config['lifecycle_adapter_factory']($this);
+            if ($adapter instanceof TenantLifecycleAdapterInterface) {
+                return $adapter;
+            }
+        }
+
+        $adapterClass = $config['lifecycle_adapter_class'] ?? 'ApplicationTenantAdapter';
+
+        if (is_string($adapterClass) && class_exists($adapterClass)) {
+            $adapter = new $adapterClass($this);
+            if ($adapter instanceof TenantLifecycleAdapterInterface) {
+                return $adapter;
+            }
+        }
+
+        show_error('Lifecycle adapter must implement TenantLifecycleAdapterInterface.', 500);
         exit;
     }
 

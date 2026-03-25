@@ -9,7 +9,9 @@ Bridge liviano para integrar `puyu-pe/sipro-internal-api-core` en aplicaciones C
    - `$config['composer_autoload'] = TRUE;` o ruta a `vendor/autoload.php`.
 2. Copiar los stubs desde `stubs/ci3/` hacia tu app (`application/controllers` y `application/config`).
 3. Configurar `application/config/internal_api.php` con tus `keys` (ideal: cargar secretos desde ENV/archivo fuera del repo).
-4. Implementar el adapter SaaS (`ApplicationTenantAdapter`) que cumpla `TenantAdapterInterface` del core.
+4. Implementar adapters SaaS:
+   - `ApplicationTenantAdapter` que cumpla `PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantProvisioningAdapterInterface`.
+   - `ApplicationTenantLifecycleAdapter` que cumpla `PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantLifecycleAdapterInterface`.
 5. Probar con requests firmados desde SIPRO.
 
 ## Notas de comportamiento

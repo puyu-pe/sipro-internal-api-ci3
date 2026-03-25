@@ -18,5 +18,6 @@ $config['internal_api'] = [
     // 'resolve_secret_by_key_id' => static function (string $keyId): ?string {
     //     return getenv('INTERNAL_API_SECRET_' . $keyId) ?: null;
     // },
-    // 'adapter_class' => 'ApplicationTenantAdapter',
+    // 'provisioning_adapter_class' => 'ApplicationTenantAdapter',
+    // 'lifecycle_adapter_class' => 'ApplicationTenantLifecycleAdapter',
 ];

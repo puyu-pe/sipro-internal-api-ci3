@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace PuyuPe\SiproInternalApiCi3\Http;
 
-use PuyuPe\SiproInternalApiCore\Contracts\TenantAdapterInterface;
-use PuyuPe\SiproInternalApiCore\Dto\ActivateTenantRequest;
-use PuyuPe\SiproInternalApiCore\Dto\CreateTenantRequest;
-use PuyuPe\SiproInternalApiCore\Dto\SuspendTenantRequest;
-use PuyuPe\SiproInternalApiCore\Dto\WarnTenantRequest;
+use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantLifecycleAdapterInterface;
+use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantProvisioningAdapterInterface;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\ProvisionPayloadDTO;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\TenantLifecycleRequestDTO;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\TenantLifecycleResponseDTO;
 use PuyuPe\SiproInternalApiCore\Errors\ErrorFactory;
 use PuyuPe\SiproInternalApiCore\Errors\ErrorResponse;
 
@@ -17,7 +17,14 @@ final class InternalApiDispatcher
     /**
      * @return array{status:int, body:array<string,mixed>}
      */
-    public function dispatch(string $method, string $path, string $rawBody, array $headers, TenantAdapterInterface $adapter): array
+    public function dispatch(
+        string $method,
+        string $path,
+        string $rawBody,
+        array $headers,
+        TenantProvisioningAdapterInterface $provisioningAdapter,
+        TenantLifecycleAdapterInterface $lifecycleAdapter
+    ): array
     {
         if (strtoupper($method) !== 'POST') {
             return [
@@ -27,7 +34,7 @@ final class InternalApiDispatcher
         }
 
         if ($path === '/internal/v1/tenants') {
-            return $this->dispatchCreateTenant($rawBody, $adapter);
+            return $this->dispatchCreateTenant($rawBody, $provisioningAdapter);
         }
 
         if (preg_match('#^/internal/v1/tenants/([^/]+):(warn|suspend|activate)$#', $path, $matches) !== 1) {
@@ -37,16 +44,16 @@ final class InternalApiDispatcher
             ];
         }
 
-        $tenantUuid = $matches[1];
+        $appKey = $matches[1];
         $action = $matches[2];
 
-        return $this->dispatchTenantAction($tenantUuid, $action, $rawBody, $adapter);
+        return $this->dispatchTenantAction($appKey, $action, $rawBody, $lifecycleAdapter);
     }
 
     /**
      * @return array{status:int, body:array<string,mixed>}
      */
-    private function dispatchCreateTenant(string $rawBody, TenantAdapterInterface $adapter): array
+    private function dispatchCreateTenant(string $rawBody, TenantProvisioningAdapterInterface $adapter): array
     {
         $payload = $this->decodeJson($rawBody);
         if ($payload === null) {
@@ -56,28 +63,19 @@ final class InternalApiDispatcher
             ];
         }
 
-        try {
-            $dto = CreateTenantRequest::fromArray($payload);
-            $dto->validate();
-        } catch (\Throwable $exception) {
-            return [
-                'status' => 400,
-                'body' => ErrorFactory::validationError($exception->getMessage())->toArray(),
-            ];
-        }
-
+        $dto = ProvisionPayloadDTO::fromArray($payload);
         $result = $adapter->createTenant($dto);
 
         return [
             'status' => 200,
-            'body' => array_merge(['ok' => true, 'status' => 'created'], $result),
+            'body' => array_merge(['ok' => true], $result->toArray()),
         ];
     }
 
     /**
      * @return array{status:int, body:array<string,mixed>}
      */
-    private function dispatchTenantAction(string $tenantUuid, string $action, string $rawBody, TenantAdapterInterface $adapter): array
+    private function dispatchTenantAction(string $appKey, string $action, string $rawBody, TenantLifecycleAdapterInterface $adapter): array
     {
         $payload = $this->decodeJson($rawBody);
         if ($payload === null) {
@@ -90,28 +88,25 @@ final class InternalApiDispatcher
         try {
             switch ($action) {
                 case 'warn':
-                    $dto = WarnTenantRequest::fromArray($payload);
-                    $dto->validate();
-                    $adapter->warnTenant($tenantUuid, $dto);
+                    $dto = TenantLifecycleRequestDTO::fromArray($payload);
+                    $result = $adapter->warnTenant($appKey, $dto);
                     return [
                         'status' => 200,
-                        'body' => ['ok' => true, 'tenant_uuid' => $tenantUuid, 'status' => 'warn'],
+                        'body' => array_merge(['ok' => true], $this->responseToArray($result)),
                     ];
                 case 'suspend':
-                    $dto = SuspendTenantRequest::fromArray($payload);
-                    $dto->validate();
-                    $adapter->suspendTenant($tenantUuid, $dto);
+                    $dto = TenantLifecycleRequestDTO::fromArray($payload);
+                    $result = $adapter->suspendTenant($appKey, $dto);
                     return [
                         'status' => 200,
-                        'body' => ['ok' => true, 'tenant_uuid' => $tenantUuid, 'status' => 'suspended'],
+                        'body' => array_merge(['ok' => true], $this->responseToArray($result)),
                     ];
                 case 'activate':
-                    $dto = ActivateTenantRequest::fromArray($payload);
-                    $dto->validate();
-                    $adapter->activateTenant($tenantUuid, $dto);
+                    $dto = TenantLifecycleRequestDTO::fromArray($payload);
+                    $result = $adapter->activateTenant($appKey, $dto);
                     return [
                         'status' => 200,
-                        'body' => ['ok' => true, 'tenant_uuid' => $tenantUuid, 'status' => 'active'],
+                        'body' => array_merge(['ok' => true], $this->responseToArray($result)),
                     ];
                 default:
                     return [
@@ -150,5 +145,13 @@ final class InternalApiDispatcher
         }
 
         return ErrorFactory::validationError('Route not found.');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function responseToArray(TenantLifecycleResponseDTO $response): array
+    {
+        return $response->toArray();
     }
 }
