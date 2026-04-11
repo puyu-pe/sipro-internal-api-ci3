@@ -37,7 +37,7 @@ final class InternalApiDispatcher
             return $this->dispatchCreateTenant($rawBody, $provisioningAdapter);
         }
 
-        if (preg_match('#^/internal/v1/tenants/([^/]+):(warn|suspend|activate)$#', $path, $matches) !== 1) {
+        if (preg_match('#^/internal/v1/tenants/([^/]+):(warn|suspend|activate|close|reopen)$#', $path, $matches) !== 1) {
             return [
                 'status' => 404,
                 'body' => $this->routeNotFoundError()->toArray(),
@@ -104,6 +104,20 @@ final class InternalApiDispatcher
                 case 'activate':
                     $dto = TenantLifecycleRequestDTO::fromArray($payload);
                     $result = $adapter->activateTenant($appKey, $dto);
+                    return [
+                        'status' => 200,
+                        'body' => array_merge(['ok' => true], $this->responseToArray($result)),
+                    ];
+                case 'close':
+                    $dto = TenantLifecycleRequestDTO::fromArray($payload);
+                    $result = $adapter->closeTenant($appKey, $dto);
+                    return [
+                        'status' => 200,
+                        'body' => array_merge(['ok' => true], $this->responseToArray($result)),
+                    ];
+                case 'reopen':
+                    $dto = TenantLifecycleRequestDTO::fromArray($payload);
+                    $result = $adapter->reopenTenant($appKey, $dto);
                     return [
                         'status' => 200,
                         'body' => array_merge(['ok' => true], $this->responseToArray($result)),
