@@ -9,8 +9,8 @@ use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantProvisioningAdapterInter
 use PuyuPe\SiproInternalApiCore\Contracts\Dto\ProvisionPayloadDTO;
 use PuyuPe\SiproInternalApiCore\Contracts\Dto\TenantLifecycleRequestDTO;
 use PuyuPe\SiproInternalApiCore\Contracts\Dto\TenantLifecycleResponseDTO;
-use PuyuPe\SiproInternalApiCore\Errors\ErrorFactory;
-use PuyuPe\SiproInternalApiCore\Errors\ErrorResponse;
+use PuyuPe\SiproInternalApiCore\Errors\ErrorCode;
+use PuyuPe\SiproInternalApiCore\Errors\InternalApiError;
 
 final class InternalApiDispatcher
 {
@@ -24,12 +24,11 @@ final class InternalApiDispatcher
         array $headers,
         TenantProvisioningAdapterInterface $provisioningAdapter,
         TenantLifecycleAdapterInterface $lifecycleAdapter
-    ): array
-    {
+    ): array {
         if (strtoupper($method) !== 'POST') {
             return [
                 'status' => 405,
-                'body' => ErrorFactory::validationError('Method not allowed.')->toArray(),
+                'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, 'Method not allowed.'),
             ];
         }
 
@@ -37,10 +36,10 @@ final class InternalApiDispatcher
             return $this->dispatchCreateTenant($rawBody, $provisioningAdapter);
         }
 
-        if (preg_match('#^/internal/v1/tenants/([^/]+):(warn|suspend|activate)$#', $path, $matches) !== 1) {
+        if (preg_match('#^/internal/v1/tenants/([^/]+):(warn|suspend|activate|close|reopen)$#', $path, $matches) !== 1) {
             return [
                 'status' => 404,
-                'body' => $this->routeNotFoundError()->toArray(),
+                'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, 'Route not found.'),
             ];
         }
 
@@ -59,7 +58,7 @@ final class InternalApiDispatcher
         if ($payload === null) {
             return [
                 'status' => 400,
-                'body' => ErrorFactory::validationError('Invalid JSON body.')->toArray(),
+                'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, 'Invalid JSON body.'),
             ];
         }
 
@@ -81,43 +80,37 @@ final class InternalApiDispatcher
         if ($payload === null) {
             return [
                 'status' => 400,
-                'body' => ErrorFactory::validationError('Invalid JSON body.')->toArray(),
+                'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, 'Invalid JSON body.'),
             ];
         }
 
         try {
-            switch ($action) {
-                case 'warn':
-                    $dto = TenantLifecycleRequestDTO::fromArray($payload);
-                    $result = $adapter->warnTenant($appKey, $dto);
-                    return [
-                        'status' => 200,
-                        'body' => array_merge(['ok' => true], $this->responseToArray($result)),
-                    ];
-                case 'suspend':
-                    $dto = TenantLifecycleRequestDTO::fromArray($payload);
-                    $result = $adapter->suspendTenant($appKey, $dto);
-                    return [
-                        'status' => 200,
-                        'body' => array_merge(['ok' => true], $this->responseToArray($result)),
-                    ];
-                case 'activate':
-                    $dto = TenantLifecycleRequestDTO::fromArray($payload);
-                    $result = $adapter->activateTenant($appKey, $dto);
-                    return [
-                        'status' => 200,
-                        'body' => array_merge(['ok' => true], $this->responseToArray($result)),
-                    ];
-                default:
-                    return [
-                        'status' => 404,
-                        'body' => $this->routeNotFoundError()->toArray(),
-                    ];
+            $dto = TenantLifecycleRequestDTO::fromArray($payload);
+
+            $result = match ($action) {
+                'warn'     => $adapter->warnTenant($appKey, $dto),
+                'suspend'  => $adapter->suspendTenant($appKey, $dto),
+                'activate' => $adapter->activateTenant($appKey, $dto),
+                'close'    => $adapter->closeTenant($appKey, $dto),
+                'reopen'   => $adapter->reopenTenant($appKey, $dto),
+                default    => null,
+            };
+
+            if ($result === null) {
+                return [
+                    'status' => 404,
+                    'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, 'Route not found.'),
+                ];
             }
+
+            return [
+                'status' => 200,
+                'body' => array_merge(['ok' => true], $this->responseToArray($result)),
+            ];
         } catch (\Throwable $exception) {
             return [
                 'status' => 400,
-                'body' => ErrorFactory::validationError($exception->getMessage())->toArray(),
+                'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, $exception->getMessage()),
             ];
         }
     }
@@ -136,15 +129,16 @@ final class InternalApiDispatcher
         return $decoded;
     }
 
-    private function routeNotFoundError(): ErrorResponse
+    /**
+     * @return array<string, mixed>
+     */
+    private function errorBody(ErrorCode $code, string $message): array
     {
-        if (method_exists(ErrorFactory::class, 'routeNotFound')) {
-            /** @var ErrorResponse $response */
-            $response = ErrorFactory::routeNotFound('Route not found.');
-            return $response;
-        }
-
-        return ErrorFactory::validationError('Route not found.');
+        return [
+            'ok' => false,
+            'code' => $code->value,
+            'message' => $message,
+        ];
     }
 
     /**

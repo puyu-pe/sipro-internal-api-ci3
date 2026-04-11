@@ -1,12 +1,21 @@
 {
   "name": "puyu-pe/sipro-internal-api-ci3",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Lightweight CI3 bridge for sipro internal API",
   "type": "library",
   "license": "proprietary",
+  "repositories": [
+    {
+      "type": "path",
+      "url": "../core",
+      "options": {
+        "symlink": true
+      }
+    }
+  ],
   "require": {
     "php": ">=8.1",
-    "puyu-pe/sipro-internal-api-core": "^1.0.1"
+    "puyu-pe/sipro-internal-api-core": "^1.1.0"
   },
   "autoload": {
     "psr-4": {
@@ -16,13 +25,11 @@
   "autoload-dev": {
     "psr-4": {
       "PuyuPe\\SiproInternalApiCi3\\Tests\\": "tests/"
-    },
-    "files": [
-      "tests/Fakes/CoreStubs.php"
-    ]
+    }
   },
   "require-dev": {
-    "phpunit/phpunit": "^10.5 || ^11.0"
+    "phpunit/phpunit": "^10.5 || ^11.0",
+    "puyu-pe/sipro-internal-api-core": "@dev || ^1.1.0"
   },
   "minimum-stability": "dev",
   "prefer-stable": true
