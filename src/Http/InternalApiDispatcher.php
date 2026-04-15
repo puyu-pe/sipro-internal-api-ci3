@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace PuyuPe\SiproInternalApiCi3\Http;
 
+use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantImpersonationAdapterInterface;
 use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantLifecycleAdapterInterface;
 use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantProvisioningAdapterInterface;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\ImpersonableUserSearchRequestDTO;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\ImpersonationRequestDTO;
 use PuyuPe\SiproInternalApiCore\Contracts\Dto\ProvisionPayloadDTO;
 use PuyuPe\SiproInternalApiCore\Contracts\Dto\TenantLifecycleRequestDTO;
 use PuyuPe\SiproInternalApiCore\Contracts\Dto\TenantLifecycleResponseDTO;
@@ -23,7 +26,8 @@ final class InternalApiDispatcher
         string $rawBody,
         array $headers,
         TenantProvisioningAdapterInterface $provisioningAdapter,
-        TenantLifecycleAdapterInterface $lifecycleAdapter
+        TenantLifecycleAdapterInterface $lifecycleAdapter,
+        ?TenantImpersonationAdapterInterface $impersonationAdapter = null
     ): array {
         if (strtoupper($method) !== 'POST') {
             return [
@@ -36,6 +40,27 @@ final class InternalApiDispatcher
             return $this->dispatchCreateTenant($rawBody, $provisioningAdapter);
         }
 
+        // Impersonation routes
+        if (preg_match('#^/internal/v1/tenants/([^/]+):impersonation-users/search$#', $path, $matches) === 1) {
+            if ($impersonationAdapter === null) {
+                return [
+                    'status' => 501,
+                    'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, 'Impersonation not implemented.'),
+                ];
+            }
+            return $this->dispatchSearchImpersonableUsers($matches[1], $rawBody, $impersonationAdapter);
+        }
+
+        if (preg_match('#^/internal/v1/tenants/([^/]+):impersonate$#', $path, $matches) === 1) {
+            if ($impersonationAdapter === null) {
+                return [
+                    'status' => 501,
+                    'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, 'Impersonation not implemented.'),
+                ];
+            }
+            return $this->dispatchImpersonateUser($matches[1], $rawBody, $impersonationAdapter);
+        }
+
         if (preg_match('#^/internal/v1/tenants/([^/]+):(warn|suspend|activate|close|reopen)$#', $path, $matches) !== 1) {
             return [
                 'status' => 404,
@@ -43,10 +68,10 @@ final class InternalApiDispatcher
             ];
         }
 
-        $appKey = $matches[1];
+        $resolveKey = $matches[1];
         $action = $matches[2];
 
-        return $this->dispatchTenantAction($appKey, $action, $rawBody, $lifecycleAdapter);
+        return $this->dispatchTenantAction($resolveKey, $action, $rawBody, $lifecycleAdapter);
     }
 
     /**
@@ -74,7 +99,7 @@ final class InternalApiDispatcher
     /**
      * @return array{status:int, body:array<string,mixed>}
      */
-    private function dispatchTenantAction(string $appKey, string $action, string $rawBody, TenantLifecycleAdapterInterface $adapter): array
+    private function dispatchTenantAction(string $resolveKey, string $action, string $rawBody, TenantLifecycleAdapterInterface $adapter): array
     {
         $payload = $this->decodeJson($rawBody);
         if ($payload === null) {
@@ -88,11 +113,11 @@ final class InternalApiDispatcher
             $dto = TenantLifecycleRequestDTO::fromArray($payload);
 
             $result = match ($action) {
-                'warn'     => $adapter->warnTenant($appKey, $dto),
-                'suspend'  => $adapter->suspendTenant($appKey, $dto),
-                'activate' => $adapter->activateTenant($appKey, $dto),
-                'close'    => $adapter->closeTenant($appKey, $dto),
-                'reopen'   => $adapter->reopenTenant($appKey, $dto),
+                'warn'     => $adapter->warnTenant($resolveKey, $dto),
+                'suspend'  => $adapter->suspendTenant($resolveKey, $dto),
+                'activate' => $adapter->activateTenant($resolveKey, $dto),
+                'close'    => $adapter->closeTenant($resolveKey, $dto),
+                'reopen'   => $adapter->reopenTenant($resolveKey, $dto),
                 default    => null,
             };
 
@@ -106,6 +131,64 @@ final class InternalApiDispatcher
             return [
                 'status' => 200,
                 'body' => array_merge(['ok' => true], $this->responseToArray($result)),
+            ];
+        } catch (\Throwable $exception) {
+            return [
+                'status' => 400,
+                'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, $exception->getMessage()),
+            ];
+        }
+    }
+
+    /**
+     * @return array{status:int, body:array<string,mixed>}
+     */
+    private function dispatchSearchImpersonableUsers(string $resolveKey, string $rawBody, TenantImpersonationAdapterInterface $adapter): array
+    {
+        $payload = $this->decodeJson($rawBody);
+        if ($payload === null) {
+            return [
+                'status' => 400,
+                'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, 'Invalid JSON body.'),
+            ];
+        }
+
+        try {
+            $dto = ImpersonableUserSearchRequestDTO::fromArray($payload);
+            $result = $adapter->searchImpersonableUsers($resolveKey, $dto);
+
+            return [
+                'status' => 200,
+                'body' => array_merge(['ok' => true], $result->toArray()),
+            ];
+        } catch (\Throwable $exception) {
+            return [
+                'status' => 400,
+                'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, $exception->getMessage()),
+            ];
+        }
+    }
+
+    /**
+     * @return array{status:int, body:array<string,mixed>}
+     */
+    private function dispatchImpersonateUser(string $resolveKey, string $rawBody, TenantImpersonationAdapterInterface $adapter): array
+    {
+        $payload = $this->decodeJson($rawBody);
+        if ($payload === null) {
+            return [
+                'status' => 400,
+                'body' => $this->errorBody(ErrorCode::VALIDATION_ERROR, 'Invalid JSON body.'),
+            ];
+        }
+
+        try {
+            $dto = ImpersonationRequestDTO::fromArray($payload);
+            $result = $adapter->impersonateUser($resolveKey, $dto);
+
+            return [
+                'status' => 200,
+                'body' => array_merge(['ok' => true], $result->toArray()),
             ];
         } catch (\Throwable $exception) {
             return [

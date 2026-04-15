@@ -6,8 +6,14 @@ namespace PuyuPe\SiproInternalApiCi3\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use PuyuPe\SiproInternalApiCi3\Http\InternalApiDispatcher;
+use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantImpersonationAdapterInterface;
 use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantLifecycleAdapterInterface;
 use PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantProvisioningAdapterInterface;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\ImpersonableUserListItemDTO;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\ImpersonableUserSearchRequestDTO;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\ImpersonableUserSearchResponseDTO;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\ImpersonationRequestDTO;
+use PuyuPe\SiproInternalApiCore\Contracts\Dto\ImpersonationResponseDTO;
 use PuyuPe\SiproInternalApiCore\Contracts\Dto\ProvisionPayloadDTO;
 use PuyuPe\SiproInternalApiCore\Contracts\Dto\ProvisionResponseDTO;
 use PuyuPe\SiproInternalApiCore\Contracts\Dto\TenantLifecycleRequestDTO;
@@ -31,7 +37,7 @@ final class InternalApiDispatcherTest extends TestCase
                 $this->lastRequest = $dto;
 
                 return new ProvisionResponseDTO(
-                    appKey: $dto->project->appKey ?? 'fake-key',
+                    resolveKey: $dto->project->resolveKey ?? 'fake-key',
                     projectCode: $dto->project->code,
                     database: 'db_fake',
                     status: 'created',
@@ -51,39 +57,39 @@ final class InternalApiDispatcherTest extends TestCase
             public ?string $lastAction = null;
             public ?TenantLifecycleRequestDTO $lastRequest = null;
 
-            public function warnTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
+            public function warnTenant(string $resolveKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
             {
                 $this->lastAction = 'warn';
                 $this->lastRequest = $dto;
-                return new TenantLifecycleResponseDTO($appKey, $dto->projectCode, 'ok', 'warned');
+                return new TenantLifecycleResponseDTO($resolveKey, $dto->projectCode, 'ok', 'warned');
             }
 
-            public function suspendTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
+            public function suspendTenant(string $resolveKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
             {
                 $this->lastAction = 'suspend';
                 $this->lastRequest = $dto;
-                return new TenantLifecycleResponseDTO($appKey, $dto->projectCode, 'ok', 'suspended');
+                return new TenantLifecycleResponseDTO($resolveKey, $dto->projectCode, 'ok', 'suspended');
             }
 
-            public function activateTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
+            public function activateTenant(string $resolveKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
             {
                 $this->lastAction = 'activate';
                 $this->lastRequest = $dto;
-                return new TenantLifecycleResponseDTO($appKey, $dto->projectCode, 'ok', 'active');
+                return new TenantLifecycleResponseDTO($resolveKey, $dto->projectCode, 'ok', 'active');
             }
 
-            public function closeTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
+            public function closeTenant(string $resolveKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
             {
                 $this->lastAction = 'close';
                 $this->lastRequest = $dto;
-                return new TenantLifecycleResponseDTO($appKey, $dto->projectCode, 'ok', 'closed');
+                return new TenantLifecycleResponseDTO($resolveKey, $dto->projectCode, 'ok', 'closed');
             }
 
-            public function reopenTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
+            public function reopenTenant(string $resolveKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO
             {
                 $this->lastAction = 'reopen';
                 $this->lastRequest = $dto;
-                return new TenantLifecycleResponseDTO($appKey, $dto->projectCode, 'ok', 'active');
+                return new TenantLifecycleResponseDTO($resolveKey, $dto->projectCode, 'ok', 'active');
             }
         };
     }
@@ -112,7 +118,7 @@ final class InternalApiDispatcherTest extends TestCase
 
     public function testWarnTenantDispatchesCorrectly(): void
     {
-        $body = json_encode(['appKey' => 'ak1', 'projectCode' => 'PROJ']);
+        $body = json_encode(['resolveKey' => 'ak1', 'projectCode' => 'PROJ']);
 
         $result = $this->dispatcher->dispatch('POST', '/internal/v1/tenants/ak1:warn', $body, [], $this->provisioningAdapter, $this->lifecycleAdapter);
 
@@ -123,7 +129,7 @@ final class InternalApiDispatcherTest extends TestCase
 
     public function testSuspendTenantDispatchesCorrectly(): void
     {
-        $body = json_encode(['appKey' => 'ak1', 'projectCode' => 'PROJ']);
+        $body = json_encode(['resolveKey' => 'ak1', 'projectCode' => 'PROJ']);
 
         $result = $this->dispatcher->dispatch('POST', '/internal/v1/tenants/ak1:suspend', $body, [], $this->provisioningAdapter, $this->lifecycleAdapter);
 
@@ -133,7 +139,7 @@ final class InternalApiDispatcherTest extends TestCase
 
     public function testActivateTenantDispatchesCorrectly(): void
     {
-        $body = json_encode(['appKey' => 'ak1', 'projectCode' => 'PROJ']);
+        $body = json_encode(['resolveKey' => 'ak1', 'projectCode' => 'PROJ']);
 
         $result = $this->dispatcher->dispatch('POST', '/internal/v1/tenants/ak1:activate', $body, [], $this->provisioningAdapter, $this->lifecycleAdapter);
 
@@ -143,7 +149,7 @@ final class InternalApiDispatcherTest extends TestCase
 
     public function testCloseTenantDispatchesCorrectly(): void
     {
-        $body = json_encode(['appKey' => 'ak1', 'projectCode' => 'PROJ', 'reason' => 'CLIENT_REQUEST']);
+        $body = json_encode(['resolveKey' => 'ak1', 'projectCode' => 'PROJ', 'reason' => 'CLIENT_REQUEST']);
 
         $result = $this->dispatcher->dispatch('POST', '/internal/v1/tenants/ak1:close', $body, [], $this->provisioningAdapter, $this->lifecycleAdapter);
 
@@ -155,7 +161,7 @@ final class InternalApiDispatcherTest extends TestCase
 
     public function testReopenTenantDispatchesCorrectly(): void
     {
-        $body = json_encode(['appKey' => 'ak1', 'projectCode' => 'PROJ']);
+        $body = json_encode(['resolveKey' => 'ak1', 'projectCode' => 'PROJ']);
 
         $result = $this->dispatcher->dispatch('POST', '/internal/v1/tenants/ak1:reopen', $body, [], $this->provisioningAdapter, $this->lifecycleAdapter);
 
@@ -167,7 +173,7 @@ final class InternalApiDispatcherTest extends TestCase
 
     public function testCloseTenantPassesRequestedByToAdapter(): void
     {
-        $body = json_encode(['appKey' => 'ak1', 'projectCode' => 'PROJ', 'requestedBy' => 'user-99']);
+        $body = json_encode(['resolveKey' => 'ak1', 'projectCode' => 'PROJ', 'requestedBy' => 'user-99']);
 
         $this->dispatcher->dispatch('POST', '/internal/v1/tenants/ak1:close', $body, [], $this->provisioningAdapter, $this->lifecycleAdapter);
 
