@@ -50,17 +50,6 @@ final class Headers
     }
 
     /**
-     * Backwards-compatible alias.
-     *
-     * @param array<string,mixed>|null $server
-     * @return array<string,string>
-     */
-    public static function fromEnvironment(?array $server = null): array
-    {
-        return self::fromGlobals($server);
-    }
-
-    /**
      * @param array<string,mixed> $headers
      * @return array<string,string>
      */

@@ -20,12 +20,12 @@ final class HeadersTest extends TestCase
         self::assertSame('application/json', $result['content-type']);
     }
 
-    public function testFromEnvironmentAliasesFromGlobals(): void
+    public function testNormalizePreservesCanonicalHeaderValues(): void
     {
-        $result = Headers::fromEnvironment([
-            'HTTP_X_SIGNATURE' => 'sig',
+        $result = Headers::normalize([
+            'X-Internal-Signature' => 'sig',
         ]);
 
-        self::assertSame('sig', $result['x-signature']);
+        self::assertSame('sig', $result['x-internal-signature']);
     }
 }

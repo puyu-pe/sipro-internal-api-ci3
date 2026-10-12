@@ -1,46 +1,87 @@
-# puyu-pe/sipro-internal-api-ci3
+# Sipro Internal API CI3 2.0
 
-Bridge liviano para integrar `puyu-pe/sipro-internal-api-core` en aplicaciones CodeIgniter 3.
+Bridge CodeIgniter 3 / PHP >=8.1 sobre core `^2.0.0`. Comparte con Laravel el
+despacho de las diez operaciones, validación, errores, HMAC y políticas de
+impersonación. El adaptador opcional clone-db también admite PHP >=8.1.
 
-## Integración rápida (CI3)
+El bridge se prueba con CI3 oficial **3.1.13** y **Pocketarc 3.3.0**, utilizado por
+Yubiz. Ambos frameworks figuran únicamente en `require-dev` para ejecutar la matriz:
+instalar el bridge no instala ni reemplaza el framework del consumidor.
 
-1. Activar Composer autoload en CI3:
-   - `application/config/config.php`
-   - `$config['composer_autoload'] = TRUE;` o ruta a `vendor/autoload.php`.
-2. Copiar los stubs desde `stubs/ci3/` hacia tu app (`application/controllers` y `application/config`).
-3. Configurar `application/config/internal_api.php` con tus `keys` (ideal: cargar secretos desde ENV/archivo fuera del repo).
-4. Implementar adapters SaaS:
-   - `ApplicationTenantAdapter` que cumpla `PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantProvisioningAdapterInterface`.
-   - `ApplicationTenantLifecycleAdapter` que cumpla `PuyuPe\SiproInternalApiCore\Contracts\Adapter\TenantLifecycleAdapterInterface`.
+## Integración
 
-   El lifecycle adapter debe implementar los 5 métodos:
-   - `warnTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO`
-   - `suspendTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO`
-   - `activateTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO`
-   - `closeTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO`
-   - `reopenTenant(string $appKey, TenantLifecycleRequestDTO $dto): TenantLifecycleResponseDTO`
+1. Instalar `puyu-pe/sipro-internal-api-ci3:^2.0` y activar Composer autoload en CI3.
+2. Copiar `stubs/ci3/application/controllers/InternalApi.php` a la aplicación.
+3. Incorporar `config/internal_api.php` y fusionar las rutas de `config/routes.php`
+   antes de rutas genéricas existentes. La ruta debe aceptar también el segmento
+   adicional de `:impersonation-users/search`.
+4. Configurar secretos en `hmac.keys` y factories en `adapters.provisioning`,
+   `lifecycle`, `clone` e `impersonation`. Cada factory recibe el controlador CI3:
 
-5. Probar con requests firmados desde SIPRO.
+```php
+'adapters' => [
+    'provisioning' => static fn ($ci) => new ApplicationProvisioningAdapter($ci),
+    'lifecycle' => static fn ($ci) => new ApplicationLifecycleAdapter($ci),
+    'clone' => static fn ($ci) => new ApplicationCloneAdapter($ci),
+    'impersonation' => static fn ($ci) => new ApplicationImpersonationAdapter($ci),
+],
+```
 
-## Rutas disponibles
+Cada resultado debe implementar la interfaz correspondiente en
+`PuyuPe\SiproInternalApiCore\Contracts\Adapter`. La resolución inválida devuelve
+`500 ADAPTER_NOT_CONFIGURED`. `enabled=false` devuelve 404.
 
-- `POST /internal/v1/tenants` — provisioning
-- `POST /internal/v1/tenants/{appKey}:warn`
-- `POST /internal/v1/tenants/{appKey}:suspend`
-- `POST /internal/v1/tenants/{appKey}:activate`
-- `POST /internal/v1/tenants/{appKey}:close`
-- `POST /internal/v1/tenants/{appKey}:reopen`
+Si la aplicación utiliza CSRF, agregue el prefijo interno a `csrf_exclude_uris`
+(por ejemplo, `internal/v1(?:/.*)?`); estas solicitudes se autentican mediante HMAC.
+Mantenga las protecciones de las demás rutas de la aplicación.
 
-## Notas de comportamiento
+## Operaciones
 
-- El controller usa `$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)` para firmar/verificar **sin querystring**.
-- Si `nonce_enabled=true`, se usa `DbNonceStore` y un nonce repetido debe fallar en verificación HMAC.
+Todas son POST bajo `/internal/v1`:
 
-## Testing
+- `/tenants`: provisioning.
+- `/tenants/{resolveKey}:warn`, `:suspend`, `:activate`, `:close`, `:reopen`.
+- `/tenants/{resolveKey}:export`, `:import`.
+- `/tenants/{resolveKey}:impersonation-users/search` y `:impersonate`.
 
-- Unit tests del paquete (sin boot de CI3): `vendor/bin/phpunit`.
-- Opcional: puedes usar `kenjis/ci-phpunit-test` para probar el controller stub dentro de una app CI3 real; no es requisito de este paquete.
+La identidad del payload es `resolveKey` (`project.resolveKey` en provisioning)
+y coincide con la ruta. El éxito devuelve `{ok:true,...camposDTO}`. Los errores
+usan `{ok:false,error:{code,message,details?}}`, igual que Laravel. Provisioning
+conserva su respuesta canónica snake_case con `resolve_key`.
 
-## Desarrollo en el workspace
+## Nonce y conexión master
 
-Este paquete forma parte del workspace `sipro-internal-workspace` junto a `core/`, `api-laravel/` y `clone-db/`. Cuando trabajás en el workspace con todos los submodulos clonados, `composer install --dev` resuelve `sipro-internal-api-core` via `path` repository (symlink a `../core`), sin necesidad de red. Fuera del workspace, se instala desde el registro de Composer normalmente.
+Instale `stubs/ci3/internal_api_nonces.sql` en una DB master dedicada. Configure
+`hmac.nonce.connection` con el nombre de la conexión CI3 y `db_debug=false` en
+esa conexión, de modo que los errores puedan convertirse en respuestas JSON.
+La tabla usa clave única y expiración en epoch seconds; no reutilice un esquema
+antiguo con columnas o tipos diferentes.
+
+La reserva es atómica y ocurre después de verificar la firma. La conexión se
+obtiene como instancia independiente para no seguir cambios de DB del tenant.
+Ejecute periódicamente el DELETE de expirados documentado en el SQL.
+`hmac.allowed_clock_skew_seconds` vale 300 por defecto. El nonce es obligatorio
+en la firma incluso si `hmac.nonce.enabled=false`.
+
+## Helpers y migración
+
+Los helpers de provisioning equivalentes a Laravel están en
+`Adapters\AbstractTenantProvisioningAdapter`: reciben una conexión CI3 y permiten
+`usingDatabase()` con restauración en `finally`. Defina `databasePrefix()` solo si
+usa el generador predeterminado de nombres; puede sustituir `buildDatabaseName()`.
+El upsert de parámetros no duplica registros cuando el valor ya es el mismo.
+
+La excepción de negocio compartida es `Core\Errors\InternalApiException`, que
+envuelve `InternalApiError`. Se eliminan el wrapper CI3 `VerifyHmac`, la firma
+anterior del dispatcher y `Headers::fromEnvironment`. Utilice el controlador y
+configuración 2.0 completos; no basta con actualizar el paquete dejando stubs 1.x.
+No se aceptan aliases de identidad ni firmas base64.
+
+## Pruebas
+
+`composer test` arranca CI3 3.1.13 real en un servidor PHP local y utiliza el
+controlador/config/rutas distribuidos. Las pruebas con `SIPRO_TEST_DB_HOST`
+comprueban nonces concurrentes, expiración y helpers sobre MariaDB desechable.
+`SIPRO_CLONE_DB_ROOT` habilita el round trip HTTP de clone-db en PHP >=8.1.
+Use `SIPRO_CI3_FRAMEWORK=pocketarc/codeigniter composer test` para ejecutar la misma
+suite con Pocketarc. El runtime del bridge se verifica en PHP 8.1–8.4.
